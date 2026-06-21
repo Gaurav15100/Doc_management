@@ -21,4 +21,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents/{document}/link',[DocumentController::class, 'link']);
     Route::post('/document-types/{documentType}/requirements',[DocumentController::class, 'addRequirement']);
     Route::post('/documents/{document}/process',[DocumentController::class, 'process']);
+    Route::post('/documents/{document}/queries',[DocumentController::class, 'createQuery']);
+    Route::get('/documents/{document}/queries',[DocumentController::class, 'listQueries']);
+    Route::post('/queries/{query}/resolve',[DocumentController::class, 'resolveQuery']);
 });

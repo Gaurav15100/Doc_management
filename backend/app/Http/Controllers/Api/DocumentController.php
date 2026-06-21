@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Storage;
 use App\Models\DocumentLink;
 use App\Models\DocumentType;
 use App\Models\DocumentTypeRequirement;
+use App\Models\Query;
 
 class DocumentController extends Controller
 {
@@ -89,23 +90,22 @@ class DocumentController extends Controller
     {
         $user = $request->user();
 
-        if ($user->role === 'admin') {
+        $query = Document::with([
+            'documentType',
+            'files'
+        ]);
 
-            $documents = Document::with([
-                'documentType',
-                'files'
-            ])->latest()->get();
+        if ($user->role !== 'admin') {
 
-        } else {
-
-            $documents = Document::with([
-                'documentType',
-                'files'
-            ])->where(
+            $query->where(
                 'uploaded_by',
                 $user->id
-            )->latest()->get();
+            );
         }
+
+        $documents = $query
+            ->latest()
+            ->get();
 
         return response()->json($documents);
     }
@@ -452,4 +452,66 @@ class DocumentController extends Controller
     ]);
     }
 //---------------------------------------------------------------------------//
+    public function createQuery(Request $request,Document $document) 
+    {
+        $user = $request->user();
+
+        if ($user->role !== 'admin') {
+            return response()->json([
+                'message' => 'Only admin can raise queries'
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'message' => 'required|string'
+        ]);
+
+        $query = Query::create([
+            'document_id' => $document->id,
+            'raised_by' => $user->id,
+            'message' => $validated['message'],
+        ]);
+
+        return response()->json([
+            'message' => 'Query created successfully',
+            'query' => $query
+        ], 201);
+    }
+//---------------------------------------------------------------------------//
+    public function listQueries(Request $request,Document $document) 
+    {
+        $queries = $document->queries()
+            ->with('raisedBy')
+            ->latest()
+            ->get();
+
+        return response()->json($queries);
+    }
+//---------------------------------------------------------------------------//
+    public function resolveQuery(Request $request,Query $query) 
+    {
+        $user = $request->user();
+
+        if ($user->role !== 'admin') {
+            return response()->json([
+                'message' => 'Only admin can resolve queries'
+            ], 403);
+        }
+
+        if ($query->resolved_at) {
+            return response()->json([
+                'message' => 'Query already resolved'
+            ], 422);
+        }
+
+        $query->update([
+            'resolved_at' => now()
+        ]);
+
+        return response()->json([
+            'message' => 'Query resolved successfully'
+        ]);
+    }
+//---------------------------------------------------------------------------//
+
 }

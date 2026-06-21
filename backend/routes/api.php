@@ -20,4 +20,5 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/documents/{document}/download',[DocumentController::class, 'download']);
     Route::post('/documents/{document}/link',[DocumentController::class, 'link']);
     Route::post('/document-types/{documentType}/requirements',[DocumentController::class, 'addRequirement']);
+    Route::post('/documents/{document}/process',[DocumentController::class, 'process']);
 });

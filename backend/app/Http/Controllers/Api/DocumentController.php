@@ -427,5 +427,29 @@ class DocumentController extends Controller
         return response()->json($result);
     }
 //---------------------------------------------------------------------------//
+    public function process(Request $request,Document $document) 
+    {
+    $user = $request->user();
 
+    if ($user->role !== 'admin') {
+        return response()->json([
+            'message' => 'Only admin can process documents'
+        ], 403);
+    }
+
+    if ($document->status === 'processed') {
+        return response()->json([
+            'message' => 'Document already processed'
+        ], 422);
+    }
+
+    $document->update([
+        'status' => 'processed'
+    ]);
+
+    return response()->json([
+        'message' => 'Document processed successfully'
+    ]);
+    }
+//---------------------------------------------------------------------------//
 }

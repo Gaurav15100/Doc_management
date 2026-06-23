@@ -12,6 +12,7 @@ use App\Models\DocumentLink;
 use App\Models\DocumentType;
 use App\Models\DocumentTypeRequirement;
 use App\Models\Query;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class DocumentController extends Controller
 {
@@ -22,6 +23,7 @@ class DocumentController extends Controller
             'document_type_id' => 'required|exists:document_types,id',
             'doc_number' => 'required|string|max:255',
             'party_id' => 'nullable|exists:parties,id',
+            'remarks' => 'nullable|string',
             'files' => 'required',
             'files.*' => 'file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
@@ -50,6 +52,7 @@ class DocumentController extends Controller
                 'document_type_id' => $validated['document_type_id'],
                 'outlet_id' => $user->outlet_id,
                 'party_id' => $validated['party_id'] ?? null,
+                'remarks' => $validated['remarks'] ?? null,
                 'uploaded_by' => $user->id,
                 'status' => 'uploaded',
             ]);
@@ -101,6 +104,77 @@ class DocumentController extends Controller
                 'uploaded_by',
                 $user->id
             );
+        }
+
+        if ($request->filled('status')) {
+
+            $query->where(
+                'status',
+                $request->status
+            );
+        }
+
+        if ($request->filled('document_type_id')) {
+
+            $query->where(
+                'document_type_id',
+                $request->document_type_id
+            );
+        }
+
+        if ($request->filled('outlet_id')) {
+
+            $query->where(
+                'outlet_id',
+                $request->outlet_id
+            );
+        }
+
+        if ($request->filled('doc_number')) {
+
+            $query->where(
+                'doc_number',
+                'like',
+                '%' . $request->doc_number . '%'
+            );
+        }
+
+        if ($request->filled('to_date')) {
+
+            $query->whereDate(
+                'created_at',
+                '<=',
+                $request->to_date
+            );
+        }
+        
+        if ($request->filled('from_date')) {
+
+            $query->whereDate(
+                'created_at',
+                '>=',
+                $request->from_date
+            );
+        }
+
+        if ($request->filled('party_id')) {
+
+            $query->where(
+                'party_id',
+                $request->party_id
+            );
+        }
+
+        if ($request->filled('link_status')) {
+
+            if ($request->link_status === 'linked') {
+
+                $query->has('links');
+
+            } elseif ($request->link_status === 'unlinked') {
+
+                $query->doesntHave('links');
+            }
         }
 
         $documents = $query
@@ -158,6 +232,7 @@ class DocumentController extends Controller
             'document_type_id' => 'required|exists:document_types,id',
             'doc_number' => 'required|string|max:255',
             'party_id' => 'nullable|exists:parties,id',
+            'remarks' => 'nullable|string',
             'files.*' => 'file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
 
@@ -169,6 +244,7 @@ class DocumentController extends Controller
                 'doc_number' => $validated['doc_number'],
                 'document_type_id' => $validated['document_type_id'],
                 'party_id' => $validated['party_id'] ?? null,
+                'remarks' => $validated['remarks'] ?? null,
             ]);
 
             if ($request->hasFile('files')) {
@@ -304,6 +380,14 @@ class DocumentController extends Controller
 //---------------------------------------------------------------------------//
     public function addRequirement(Request $request,DocumentType $documentType) 
     {
+        $user = $request->user();
+
+        if ($user->role !== 'admin') {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
         $validated = $request->validate([
             'required_document_type_id' =>
                 'required|exists:document_types,id',
@@ -513,5 +597,219 @@ class DocumentController extends Controller
         ]);
     }
 //---------------------------------------------------------------------------//
+    public function destroy(
+        Request $request,
+        Document $document
+    )
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
 
+        $document->update([
+            'deleted_by' => $request->user()->id,
+        ]);
+
+        DocumentLink::where(
+            'document_id',
+            $document->id
+        )->delete();
+
+        DocumentLink::where(
+            'linked_document_id',
+            $document->id
+        )->delete();
+
+        $document->delete();
+
+        return response()->json([
+            'message' => 'Document deleted successfully',
+        ]);
+    }
+//---------------------------------------------------------------------------//
+    public function deleteFile(
+        Request $request,
+        DocumentFile $file
+    )
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $document = $file->document;
+
+        Storage::disk('public')->delete(
+            $file->file_path
+        );
+
+        $file->delete();
+
+        if ($document->files()->count() === 0) {
+
+            $document->update([
+                'deleted_by' => $request->user()->id,
+            ]);
+
+            $document->delete();
+
+            return response()->json([
+                'message' => 'Last file removed. Document deleted.',
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'File deleted successfully',
+        ]);
+    }
+//---------------------------------------------------------------------------//
+    public function addFiles(
+        Request $request,
+        Document $document
+    )
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        if ($document->file_mode !== 'images') {
+            return response()->json([
+                'message' => 'Files can only be added to image documents'
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'files' => 'required',
+            'files.*' => 'file|mimes:jpg,jpeg,png|max:10240',
+        ]);
+
+        $lastSortOrder = $document->files()
+            ->max('sort_order') ?? 0;
+
+        foreach ($request->file('files') as $index => $file) {
+
+            $path = $file->store(
+                'documents',
+                'public'
+            );
+
+            DocumentFile::create([
+                'document_id' => $document->id,
+                'file_name' => $file->getClientOriginalName(),
+                'file_path' => $path,
+                'sort_order' => $lastSortOrder + $index + 1,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Files added successfully',
+        ]);
+    }
+//---------------------------------------------------------------------------//
+    public function replaceFile(
+        Request $request,
+        DocumentFile $file
+    )
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'file' => 'required|file|mimes:jpg,jpeg,png|max:10240',
+        ]);
+
+        Storage::disk('public')->delete(
+            $file->file_path
+        );
+
+        $newFile = $request->file('file');
+
+        $path = $newFile->store(
+            'documents',
+            'public'
+        );
+
+        $file->update([
+            'file_name' => $newFile->getClientOriginalName(),
+            'file_path' => $path,
+        ]);
+
+        return response()->json([
+            'message' => 'File replaced successfully',
+        ]);
+    }
+//---------------------------------------------------------------------------//
+    public function unlink(
+        Request $request,
+        DocumentLink $link
+    )
+    {
+        if ($request->user()->role !== 'admin') {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $link->delete();
+
+        return response()->json([
+            'message' => 'Documents unlinked successfully'
+        ]);
+    }
+//---------------------------------------------------------------------------//
+    public function downloadPdf(
+        Request $request,
+        Document $document
+    )
+    {
+        $user = $request->user();
+
+        if (
+            $user->role !== 'admin' &&
+            $document->uploaded_by !== $user->id
+        ) {
+            return response()->json([
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        if ($document->file_mode !== 'images') {
+            return response()->json([
+                'message' => 'PDF generation only available for image documents'
+            ], 422);
+        }
+
+        $document->load('files');
+
+        $html = '';
+
+        foreach ($document->files as $file) {
+
+            $path = storage_path(
+                'app/public/' . $file->file_path
+            );
+
+            $html .= '
+                <div style="page-break-after: always;">
+                    <img src="' . $path . '" style="width:100%;">
+                </div>
+            ';
+        }
+
+        $pdf = Pdf::loadHTML($html);
+
+        return $pdf->download(
+            'document-' . $document->id . '.pdf'
+        );
+    }
+//---------------------------------------------------------------------------//
+//---------------------------------------------------------------------------//
 }

@@ -18,6 +18,7 @@ class Document extends Model
         'uploaded_by',
         'status',
         'remarks',
+        'deleted_by',
     ];
 
     public function documentType()
@@ -58,5 +59,13 @@ class Document extends Model
     public function linkedDocuments()
     {
         return $this->hasMany(DocumentLink::class)->with('linkedDocument');
+    }
+
+    public function deletedBy()
+    {
+        return $this->belongsTo(
+            User::class,
+            'deleted_by'
+        );
     }
 }

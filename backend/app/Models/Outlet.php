@@ -8,6 +8,7 @@ class Outlet extends Model
 {
     protected $fillable = [
         'name',
+        'is_active',
     ];
 
     public function users()

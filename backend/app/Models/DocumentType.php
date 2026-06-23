@@ -9,6 +9,7 @@ class DocumentType extends Model
     protected $fillable = [
         'name',
         'linking_required',
+        'is_active',
     ];
 
     public function requirements()
